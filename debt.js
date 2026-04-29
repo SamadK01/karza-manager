@@ -78,21 +78,132 @@ function closeImageModal() {
   imageModalEl.classList.remove("flex");
 }
 
+function compressImage(dataUrl, maxWidth = 600, maxHeight = 600, quality = 0.5) {
+  return new Promise((resolve) => {
+    console.log("Starting image compression...");
+    
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Calculate new dimensions - aggressive compression
+      let { width, height } = img;
+      console.log(`Original dimensions: ${width}x${height}`);
+      
+      if (width > maxWidth || height > maxHeight) {
+        const aspectRatio = width / height;
+        if (width > height) {
+          width = maxWidth;
+          height = width / aspectRatio;
+        } else {
+          height = maxHeight;
+          width = height * aspectRatio;
+        }
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      
+      console.log(`Compressed dimensions: ${width}x${height}`);
+      
+      // Draw and compress
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Try to get under 500KB, reduce quality aggressively if needed
+      let currentQuality = quality;
+      const checkSize = () => {
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', currentQuality);
+        const sizeInKB = Math.round(compressedDataUrl.length * 0.75 / 1024);
+        
+        console.log(`Compression attempt - Quality: ${currentQuality}, Size: ${sizeInKB}KB`);
+        
+        if (sizeInKB > 500 && currentQuality > 0.1) {
+          currentQuality -= 0.1;
+          return checkSize();
+        }
+        
+        resolve({
+          compressedDataUrl,
+          sizeInKB,
+          originalSize: Math.round(dataUrl.length * 0.75 / 1024)
+        });
+      };
+      
+      checkSize();
+    };
+    img.onerror = () => {
+      console.error("Image loading failed during compression");
+      resolve({
+        compressedDataUrl: dataUrl,
+        sizeInKB: Math.round(dataUrl.length * 0.75 / 1024),
+        originalSize: Math.round(dataUrl.length * 0.75 / 1024)
+      });
+    };
+    img.src = dataUrl;
+  });
+}
+
 function readFilesAsDataUrls(fileList) {
   const files = Array.from(fileList || []);
+  console.log(`Processing ${files.length} files for upload...`);
+  
   return Promise.all(
     files.map(
       (file) =>
         new Promise((resolve, reject) => {
+          // Only process image files
+          if (!file.type.startsWith('image/')) {
+            console.error(`Invalid file type: ${file.type}`);
+            reject(new Error('Only image files are allowed'));
+            return;
+          }
+          
+          // Check file size before processing (max 10MB)
+          const fileSizeInMB = file.size / (1024 * 1024);
+          if (fileSizeInMB > 10) {
+            console.error(`File too large: ${fileSizeInMB}MB`);
+            reject(new Error('File size must be less than 10MB'));
+            return;
+          }
+          
+          console.log(`Processing file: ${file.name} (${fileSizeInMB.toFixed(2)}MB)`);
+          
           const reader = new FileReader();
-          reader.onload = () =>
-            resolve({
-              id: crypto.randomUUID(),
-              name: file.name,
-              dataUrl: String(reader.result || ""),
-              uploadedAt: new Date().toISOString(),
-            });
-          reader.onerror = () => reject(new Error("File read failed"));
+          reader.onload = async () => {
+            try {
+              const originalDataUrl = String(reader.result || "");
+              console.log(`Original Base64 size: ${Math.round(originalDataUrl.length * 0.75 / 1024)}KB`);
+              
+              const { compressedDataUrl, sizeInKB, originalSize } = await compressImage(originalDataUrl);
+              
+              // Validate compressed size
+              if (sizeInKB > 500) {
+                console.error(`Compressed image still too large: ${sizeInKB}KB`);
+                reject(new Error('Image too large even after compression. Please use a smaller photo.'));
+                return;
+              }
+              
+              console.log(`Successfully compressed: ${file.name} - ${sizeInKB}KB (was ${originalSize}KB)`);
+              
+              resolve({
+                id: crypto.randomUUID(),
+                name: file.name,
+                dataUrl: compressedDataUrl,
+                originalDataUrl, // Keep original for reference if needed
+                sizeInKB,
+                originalSize,
+                uploadedAt: new Date().toISOString(),
+              });
+            } catch (error) {
+              console.error('Image compression failed:', error);
+              reject(new Error('Image compression failed: ' + error.message));
+            }
+          };
+          reader.onerror = (error) => {
+            console.error('File read failed:', error);
+            reject(new Error('File read failed'));
+          };
           reader.readAsDataURL(file);
         })
     )
@@ -394,10 +505,29 @@ function applyDebtModeUI(mode) {
 // Firestore Integration
 function bindDebtFirestore(user) {
   if (unsubscribeDebts) unsubscribeDebts();
+  
+  console.log("Binding debt Firestore listener for user:", user.uid);
+  
   unsubscribeDebts = onSnapshot(query(collection(db, "debts"), where("userId", "==", user.uid)), (snap) => {
-    debts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    console.log(`Received ${snap.docs.length} debt documents from Firestore`);
+    
+    debts = snap.docs.map((d) => {
+      const debtData = { id: d.id, ...d.data() };
+      
+      // Log attachment details for debugging
+      if (debtData.attachments && debtData.attachments.length > 0) {
+        console.log(`Debt "${debtData.lenderName}" has ${debtData.attachments.length} attachments:`, 
+          debtData.attachments.map(att => `${att.name} (${att.sizeInKB}KB)`));
+      }
+      
+      return debtData;
+    });
+    
+    console.log("Processed debts:", debts.length);
     renderSummary();
     renderDebts();
+  }, (error) => {
+    console.error("Firestore listener error:", error);
   });
 }
 
@@ -406,33 +536,89 @@ function initializeDebtModule() {
   // Form submission
   debtForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    console.log("Starting debt form submission...");
+    
     const user = window.authModule?.currentUser;
-    if (!user) return;
+    if (!user) {
+      console.error("No user found for debt creation");
+      window.alert("Please login to add a debt.");
+      return;
+    }
+    
     const data = new FormData(debtForm);
-    const attachments = await readFilesAsDataUrls(debtImagesInputEl?.files);
-    const side = debtSide;
-    const penaltyPerDay = side === "receive" ? Number(data.get("penaltyPerDay")) || 0 : 0;
-    const payload = {
-      userId: user.uid,
-      side,
-      lenderName: String(data.get("lenderName") || "").trim(),
-      amountBorrowed: Number(data.get("amountBorrowed")),
-      dateBorrowed: data.get("dateBorrowed"),
-      deadlineDate: data.get("deadlineDate"),
-      whatsapp: String(data.get("counterpartyWhatsapp") || "").trim(),
-      penaltyPerDay,
-      interestType: data.get("interestType"),
-      interestRate: Number(data.get("interestRate")) || 0,
-      interestAfterMonths: Number(data.get("interestAfterMonths")) || 0,
-      attachments,
-      payments: [],
-      createdAt: new Date().toISOString(),
-    };
-    await addDoc(collection(db, "debts"), payload);
-    debtForm.reset();
-    handleInterestVisibility();
-    applyDebtModeUI(debtSide);
-    if (debtImagesInputEl) debtImagesInputEl.value = "";
+    console.log("Form data collected:", Object.fromEntries(data));
+    
+    try {
+      // Process images with error handling
+      let attachments = [];
+      const files = debtImagesInputEl?.files;
+      if (files && files.length > 0) {
+        console.log(`Processing ${files.length} image files...`);
+        attachments = await readFilesAsDataUrls(files);
+        console.log(`Successfully processed ${attachments.length} attachments`);
+        
+        // Log attachment details
+        attachments.forEach((att, index) => {
+          console.log(`Attachment ${index + 1}: ${att.name} - ${att.sizeInKB}KB`);
+        });
+      }
+      
+      const side = debtSide;
+      const penaltyPerDay = side === "receive" ? Number(data.get("penaltyPerDay")) || 0 : 0;
+      
+      const payload = {
+        userId: user.uid,
+        side,
+        lenderName: String(data.get("lenderName") || "").trim(),
+        amountBorrowed: Number(data.get("amountBorrowed")),
+        dateBorrowed: data.get("dateBorrowed"),
+        deadlineDate: data.get("deadlineDate"),
+        whatsapp: String(data.get("counterpartyWhatsapp") || "").trim(),
+        penaltyPerDay,
+        interestType: data.get("interestType"),
+        interestRate: Number(data.get("interestRate")) || 0,
+        interestAfterMonths: Number(data.get("interestAfterMonths")) || 0,
+        attachments,
+        payments: [],
+        createdAt: new Date().toISOString(),
+      };
+      
+      console.log("Prepared payload for Firestore:", {
+        ...payload,
+        attachments: `${payload.attachments.length} files, total size: ${payload.attachments.reduce((sum, att) => sum + att.sizeInKB, 0)}KB`
+      });
+      
+      // Save to Firestore with error handling
+      console.log("Saving to Firestore...");
+      const docRef = await addDoc(collection(db, "debts"), payload);
+      console.log("Successfully saved debt with ID:", docRef.id);
+      
+      // Reset form
+      debtForm.reset();
+      handleInterestVisibility();
+      applyDebtModeUI(debtSide);
+      if (debtImagesInputEl) debtImagesInputEl.value = "";
+      
+      // Clear preview
+      const previewEl = document.getElementById("debtImagePreview");
+      if (previewEl) previewEl.innerHTML = "";
+      
+      window.alert("Debt saved successfully!");
+      
+    } catch (error) {
+      console.error("Error saving debt:", error);
+      
+      // Provide user-friendly error messages
+      if (error.message.includes('Image too large')) {
+        window.alert("Image too large or Database error. Please use a smaller photo.");
+      } else if (error.message.includes('permission-denied')) {
+        window.alert("Permission denied. Please check your login status.");
+      } else if (error.message.includes('unavailable') || error.message.includes('timeout')) {
+        window.alert("Database connection error. Please try again.");
+      } else {
+        window.alert("Image too large or Database error. Please try again or use a smaller photo.");
+      }
+    }
   });
 
   // UI Controls
@@ -463,6 +649,34 @@ function initializeDebtModule() {
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeImageModal();
+    });
+  }
+
+  // Image preview functionality
+  const debtImagesInputEl = document.getElementById("debtImagesInput");
+  const debtImagePreviewEl = document.getElementById("debtImagePreview");
+  
+  if (debtImagesInputEl && debtImagePreviewEl) {
+    debtImagesInputEl.addEventListener("change", (e) => {
+      const files = Array.from(e.target.files);
+      debtImagePreviewEl.innerHTML = "";
+      
+      files.forEach((file, index) => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const preview = document.createElement("div");
+            preview.className = "relative group";
+            preview.innerHTML = `
+              <img src="${e.target.result}" class="h-16 w-16 rounded-lg object-cover border border-slate-200" />
+              <button type="button" class="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-rose-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity" onclick="this.parentElement.remove(); updateFileInput('debtImagesInput')">×</button>
+              <div class="mt-1 text-xs text-slate-500 text-center">${file.name}</div>
+            `;
+            debtImagePreviewEl.appendChild(preview);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
     });
   }
 

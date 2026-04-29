@@ -99,5 +99,14 @@ window.addEventListener('authStateChanged', (event) => {
   }
 });
 
+// Helper function to update file input after removing previews
+window.updateFileInput = function(inputId) {
+  const input = document.getElementById(inputId);
+  if (input) {
+    const dt = new DataTransfer();
+    input.files = dt.files;
+  }
+};
+
 // Export for global access
 window.downloadSummaryPdf = downloadSummaryPdf;

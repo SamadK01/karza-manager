@@ -130,7 +130,15 @@
                 </div>
                 <div class="rounded-xl border border-slate-200 bg-white p-3">
                   <label class="block text-sm font-semibold text-slate-700" for="debtImagesInput">Upload Image (NIC/Receipts)</label>
-                  <input id="debtImagesInput" name="debtImagesInput" type="file" accept="image/*" multiple class="mt-2 w-full text-sm" />
+                  <div class="mt-2">
+                    <input id="debtImagesInput" name="debtImagesInput" type="file" accept="image/*" multiple class="hidden" />
+                    <button type="button" onclick="document.getElementById('debtImagesInput').click()" class="w-full rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-center transition hover:border-brand-400 hover:bg-brand-50">
+                      <i data-lucide="upload" class="mx-auto h-5 w-5 text-slate-400"></i>
+                      <p class="mt-1 text-sm text-slate-600">Click to upload images</p>
+                      <p class="text-xs text-slate-500">PNG, JPG up to 10MB (auto-compressed)</p>
+                    </button>
+                    <div id="debtImagePreview" class="mt-2 flex flex-wrap gap-2"></div>
+                  </div>
                 </div>
                 <select id="interestType" name="interestType" class="w-full rounded-xl border px-3 py-2.5">
                   <option value="none">No Interest</option>
@@ -161,14 +169,14 @@
                     <label class="flex items-center gap-3 rounded-lg border border-white bg-white p-3 cursor-pointer hover:bg-slate-50">
                       <input type="radio" name="vcRole" value="admin" required class="h-4 w-4 text-brand-500" />
                       <div>
-                        <span class="font-semibold text-slate-900">I am the Admin (Zimaydar)</span>
+                        <span class="font-semibold text-slate-900">I am the Admin</span>
                         <p class="text-xs text-slate-600">I will manage this VC and track all payments</p>
                       </div>
                     </label>
                     <label class="flex items-center gap-3 rounded-lg border border-white bg-white p-3 cursor-pointer hover:bg-slate-50">
                       <input type="radio" name="vcRole" value="member" required class="h-4 w-4 text-brand-500" />
                       <div>
-                        <span class="font-semibold text-slate-900">I am a Member (Mera Hissa Hai)</span>
+                        <span class="font-semibold text-slate-900">I am a Member</span>
                         <p class="text-xs text-slate-600">I am participating in this VC as a member</p>
                       </div>
                     </label>
@@ -198,7 +206,15 @@
 
                 <div class="rounded-xl border border-slate-200 bg-white p-3">
                   <label class="block text-sm font-semibold text-slate-700" for="vcImagesInput">Upload VC Image (optional)</label>
-                  <input id="vcImagesInput" name="vcImagesInput" type="file" accept="image/*" multiple class="mt-2 w-full text-sm" />
+                  <div class="mt-2">
+                    <input id="vcImagesInput" name="vcImagesInput" type="file" accept="image/*" multiple class="hidden" />
+                    <button type="button" onclick="document.getElementById('vcImagesInput').click()" class="w-full rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-center transition hover:border-brand-400 hover:bg-brand-50">
+                      <i data-lucide="upload" class="mx-auto h-5 w-5 text-slate-400"></i>
+                      <p class="mt-1 text-sm text-slate-600">Click to upload images</p>
+                      <p class="text-xs text-slate-500">PNG, JPG up to 10MB (auto-compressed)</p>
+                    </button>
+                    <div id="vcImagePreview" class="mt-2 flex flex-wrap gap-2"></div>
+                  </div>
                 </div>
 
                 <button class="w-full rounded-xl bg-slate-900 px-4 py-2.5 font-semibold text-white">Save VC</button>

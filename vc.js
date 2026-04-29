@@ -72,21 +72,132 @@ function openImageModal(dataUrl) {
   imageModalEl.classList.add("flex");
 }
 
+function compressImage(dataUrl, maxWidth = 600, maxHeight = 600, quality = 0.5) {
+  return new Promise((resolve) => {
+    console.log("Starting VC image compression...");
+    
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Calculate new dimensions - aggressive compression
+      let { width, height } = img;
+      console.log(`Original VC image dimensions: ${width}x${height}`);
+      
+      if (width > maxWidth || height > maxHeight) {
+        const aspectRatio = width / height;
+        if (width > height) {
+          width = maxWidth;
+          height = width / aspectRatio;
+        } else {
+          height = maxHeight;
+          width = height * aspectRatio;
+        }
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      
+      console.log(`Compressed VC image dimensions: ${width}x${height}`);
+      
+      // Draw and compress
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Try to get under 500KB, reduce quality aggressively if needed
+      let currentQuality = quality;
+      const checkSize = () => {
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', currentQuality);
+        const sizeInKB = Math.round(compressedDataUrl.length * 0.75 / 1024);
+        
+        console.log(`VC compression attempt - Quality: ${currentQuality}, Size: ${sizeInKB}KB`);
+        
+        if (sizeInKB > 500 && currentQuality > 0.1) {
+          currentQuality -= 0.1;
+          return checkSize();
+        }
+        
+        resolve({
+          compressedDataUrl,
+          sizeInKB,
+          originalSize: Math.round(dataUrl.length * 0.75 / 1024)
+        });
+      };
+      
+      checkSize();
+    };
+    img.onerror = () => {
+      console.error("VC image loading failed during compression");
+      resolve({
+        compressedDataUrl: dataUrl,
+        sizeInKB: Math.round(dataUrl.length * 0.75 / 1024),
+        originalSize: Math.round(dataUrl.length * 0.75 / 1024)
+      });
+    };
+    img.src = dataUrl;
+  });
+}
+
 function readFilesAsDataUrls(fileList) {
   const files = Array.from(fileList || []);
+  console.log(`Processing ${files.length} VC files for upload...`);
+  
   return Promise.all(
     files.map(
       (file) =>
         new Promise((resolve, reject) => {
+          // Only process image files
+          if (!file.type.startsWith('image/')) {
+            console.error(`Invalid VC file type: ${file.type}`);
+            reject(new Error('Only image files are allowed'));
+            return;
+          }
+          
+          // Check file size before processing (max 10MB)
+          const fileSizeInMB = file.size / (1024 * 1024);
+          if (fileSizeInMB > 10) {
+            console.error(`VC file too large: ${fileSizeInMB}MB`);
+            reject(new Error('File size must be less than 10MB'));
+            return;
+          }
+          
+          console.log(`Processing VC file: ${file.name} (${fileSizeInMB.toFixed(2)}MB)`);
+          
           const reader = new FileReader();
-          reader.onload = () =>
-            resolve({
-              id: crypto.randomUUID(),
-              name: file.name,
-              dataUrl: String(reader.result || ""),
-              uploadedAt: new Date().toISOString(),
-            });
-          reader.onerror = () => reject(new Error("File read failed"));
+          reader.onload = async () => {
+            try {
+              const originalDataUrl = String(reader.result || "");
+              console.log(`Original VC Base64 size: ${Math.round(originalDataUrl.length * 0.75 / 1024)}KB`);
+              
+              const { compressedDataUrl, sizeInKB, originalSize } = await compressImage(originalDataUrl);
+              
+              // Validate compressed size
+              if (sizeInKB > 500) {
+                console.error(`Compressed VC image still too large: ${sizeInKB}KB`);
+                reject(new Error('Image too large even after compression. Please use a smaller photo.'));
+                return;
+              }
+              
+              console.log(`Successfully compressed VC: ${file.name} - ${sizeInKB}KB (was ${originalSize}KB)`);
+              
+              resolve({
+                id: crypto.randomUUID(),
+                name: file.name,
+                dataUrl: compressedDataUrl,
+                originalDataUrl, // Keep original for reference if needed
+                sizeInKB,
+                originalSize,
+                uploadedAt: new Date().toISOString(),
+              });
+            } catch (error) {
+              console.error('VC image compression failed:', error);
+              reject(new Error('Image compression failed: ' + error.message));
+            }
+          };
+          reader.onerror = (error) => {
+            console.error('VC file read failed:', error);
+            reject(new Error('File read failed'));
+          };
           reader.readAsDataURL(file);
         })
     )
@@ -234,20 +345,40 @@ function renderCommittees() {
       } else {
         // Investment view - show user's status
         const userMember = c.members?.find(m => m.whatsapp === user.email || m.whatsapp === user.phoneNumber);
-        const userStatus = userMember ? "Active" : "Not Found";
-        const statusColor = userMember ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700";
+        const userTurn = userMember?.turnNumber || "Not Set";
+        const userStatus = userMember ? "Active" : "Pending";
+        const statusColor = userMember ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200";
+        
+        // Calculate VC progress
+        const paidMonths = Array.isArray(c.paidMonthNumbers) ? c.paidMonthNumbers.length : 0;
+        const progressPercent = totalMonths > 0 ? Math.round((paidMonths / totalMonths) * 100) : 0;
+        const isCompleted = paidMonths >= totalMonths;
+        const vcStatus = isCompleted ? "Completed" : "Active";
+        const vcStatusColor = isCompleted ? "bg-slate-50 text-slate-700 border-slate-200" : "bg-emerald-50 text-emerald-700 border-emerald-200";
         
         card.innerHTML = `
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <p class="truncate text-sm font-bold text-slate-900">${c.vcName || "Untitled VC"}</p>
               <p class="mt-1 text-xs text-slate-600">
-                ${formatCurrency(monthlyInstallment)} x ${totalMonths} months
+                Admin: ${c.userId === userId ? "You" : "External Admin"}
               </p>
-              <p class="mt-1 text-xs text-slate-500">Your Turn: #${userMember?.turnNumber || "N/A"}</p>
+              <p class="mt-1 text-xs text-slate-600">
+                ${formatCurrency(monthlyInstallment)} × ${totalMonths} months
+              </p>
+              <p class="mt-1 text-xs text-slate-500">Your Turn: #${userTurn}</p>
+              <div class="mt-2 flex items-center gap-2">
+                <div class="flex-1 bg-slate-200 rounded-full h-1.5">
+                  <div class="bg-emerald-500 h-1.5 rounded-full" style="width: ${progressPercent}%"></div>
+                </div>
+                <span class="text-[10px] text-slate-500">${progressPercent}%</span>
+              </div>
             </div>
-            <div class="shrink-0">
-              <span class="inline-flex items-center rounded-full ${statusColor} px-2 py-1 text-[11px] font-semibold">
+            <div class="shrink-0 flex flex-col gap-1">
+              <span class="inline-flex items-center rounded-full ${vcStatusColor} px-2 py-1 text-[11px] font-semibold border">
+                ${vcStatus}
+              </span>
+              <span class="inline-flex items-center rounded-full ${statusColor} px-2 py-1 text-[11px] font-semibold border">
                 ${userStatus}
               </span>
             </div>
@@ -813,6 +944,34 @@ function initializeVcModule() {
       membersInputsEl.appendChild(createMemberRow());
       syncMemberRemoveButtons();
       if (window.lucide) window.lucide.createIcons();
+    });
+  }
+
+  // Image preview functionality
+  const vcImagesInputEl = document.getElementById("vcImagesInput");
+  const vcImagePreviewEl = document.getElementById("vcImagePreview");
+  
+  if (vcImagesInputEl && vcImagePreviewEl) {
+    vcImagesInputEl.addEventListener("change", (e) => {
+      const files = Array.from(e.target.files);
+      vcImagePreviewEl.innerHTML = "";
+      
+      files.forEach((file, index) => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const preview = document.createElement("div");
+            preview.className = "relative group";
+            preview.innerHTML = `
+              <img src="${e.target.result}" class="h-16 w-16 rounded-lg object-cover border border-slate-200" />
+              <button type="button" class="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-rose-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity" onclick="this.parentElement.remove(); updateFileInput('vcImagesInput')">×</button>
+              <div class="mt-1 text-xs text-slate-500 text-center">${file.name}</div>
+            `;
+            vcImagePreviewEl.appendChild(preview);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
     });
   }
 
