@@ -156,6 +156,26 @@
                 <input id="currentPayoutMonth" name="currentPayoutMonth" required type="number" min="1" placeholder="Current Payout Month (e.g., 3)" class="w-full rounded-xl border px-3 py-2.5" />
 
                 <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <label class="block text-sm font-semibold text-slate-700">Who is managing this VC?</label>
+                  <div class="mt-2 space-y-2">
+                    <label class="flex items-center gap-3 rounded-lg border border-white bg-white p-3 cursor-pointer hover:bg-slate-50">
+                      <input type="radio" name="vcRole" value="admin" required class="h-4 w-4 text-brand-500" />
+                      <div>
+                        <span class="font-semibold text-slate-900">I am the Admin (Zimaydar)</span>
+                        <p class="text-xs text-slate-600">I will manage this VC and track all payments</p>
+                      </div>
+                    </label>
+                    <label class="flex items-center gap-3 rounded-lg border border-white bg-white p-3 cursor-pointer hover:bg-slate-50">
+                      <input type="radio" name="vcRole" value="member" required class="h-4 w-4 text-brand-500" />
+                      <div>
+                        <span class="font-semibold text-slate-900">I am a Member (Mera Hissa Hai)</span>
+                        <p class="text-xs text-slate-600">I am participating in this VC as a member</p>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <div class="flex items-center justify-between gap-3">
                     <h3 class="text-sm font-semibold text-slate-800">Members</h3>
                     <button id="addMemberBtn" type="button" class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">
@@ -210,31 +230,50 @@
 
             <div class="rounded-3xl bg-white p-6 shadow">
               <h2 class="text-xl font-bold">VC Management</h2>
-              <div class="mt-4 grid gap-4 lg:grid-cols-[320px,1fr]">
-                <div>
-                  <div id="committeeList" class="grid gap-3"></div>
-                </div>
+              
+              <!-- VC Tab Navigation -->
+              <div class="mt-4 inline-flex w-full rounded-xl bg-slate-100 p-1">
+                <button id="vcManagedByMeBtn" type="button" class="flex-1 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow border border-slate-200">
+                  Managed by Me
+                </button>
+                <button id="vcMyInvestmentsBtn" type="button" class="flex-1 rounded-lg px-3 py-2 text-sm font-semibold text-slate-600">
+                  My Investments
+                </button>
+              </div>
 
-                <div id="vcDetailsPanel" class="hidden rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="min-w-0">
-                      <p class="text-xs text-slate-500">Selected VC</p>
-                      <h3 id="vcDetailsName" class="truncate text-lg font-bold text-slate-900"></h3>
-                      <p id="vcDetailsMeta" class="mt-1 text-sm text-slate-600"></p>
-                      <div id="vc-attachments" class="mt-3 flex gap-2"></div>
+              <!-- Managed by Me Content -->
+              <div id="vcManagedContent" class="mt-4">
+                <div class="grid gap-4 lg:grid-cols-[320px,1fr]">
+                  <div>
+                    <div id="committeeList" class="grid gap-3"></div>
+                  </div>
+
+                  <div id="vcDetailsPanel" class="hidden rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <p class="text-xs text-slate-500">Selected VC</p>
+                        <h3 id="vcDetailsName" class="truncate text-lg font-bold text-slate-900"></h3>
+                        <p id="vcDetailsMeta" class="mt-1 text-sm text-slate-600"></p>
+                        <div id="vc-attachments" class="mt-3 flex gap-2"></div>
+                      </div>
                     </div>
-                  </div>
 
-                  <div class="mt-4 inline-flex w-full rounded-xl bg-white p-1">
-                    <button id="vcTabOverviewBtn" class="w-1/3 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-800">Overview</button>
-                    <button id="vcTabPaymentsBtn" class="w-1/3 rounded-lg px-3 py-2 text-sm font-semibold text-slate-600">Payments</button>
-                    <button id="vcTabScheduleBtn" class="w-1/3 rounded-lg px-3 py-2 text-sm font-semibold text-slate-600">Schedule</button>
-                  </div>
+                    <div class="mt-4 inline-flex w-full rounded-xl bg-white p-1">
+                      <button id="vcTabOverviewBtn" class="w-1/3 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-800">Overview</button>
+                      <button id="vcTabPaymentsBtn" class="w-1/3 rounded-lg px-3 py-2 text-sm font-semibold text-slate-600">Payments</button>
+                      <button id="vcTabScheduleBtn" class="w-1/3 rounded-lg px-3 py-2 text-sm font-semibold text-slate-600">Schedule</button>
+                    </div>
 
-                  <div class="mt-4" id="vcTabOverviewEl"></div>
-                  <div class="mt-4 hidden" id="vcTabPaymentsEl"></div>
-                  <div class="mt-4 hidden" id="vcTabScheduleEl"></div>
+                    <div class="mt-4" id="vcTabOverviewEl"></div>
+                    <div class="mt-4 hidden" id="vcTabPaymentsEl"></div>
+                    <div class="mt-4 hidden" id="vcTabScheduleEl"></div>
+                  </div>
                 </div>
+              </div>
+
+              <!-- My Investments Content -->
+              <div id="vcInvestmentsContent" class="mt-4 hidden">
+                <div id="vcInvestmentsList" class="grid gap-3"></div>
               </div>
             </div>
           </section>
@@ -299,6 +338,9 @@
 
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script type="module" src="./auth.js"></script>
+    <script type="module" src="./debt.js"></script>
+    <script type="module" src="./vc.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>
