@@ -17,8 +17,7 @@ const db = getFirestore();
 // DOM Elements
 const committeeForm = document.getElementById("committeeForm");
 const committeeList = document.getElementById("committeeList");
-const addMemberBtn = document.getElementById("addMemberBtn");
-const membersInputsEl = document.getElementById("membersInputs");
+const membersInputsEl = document.getElementById("membersInputs"); // Keep for backward compatibility
 const vcDetailsPanel = document.getElementById("vcDetailsPanel");
 const vcDetailsName = document.getElementById("vcDetailsName");
 const vcDetailsMeta = document.getElementById("vcDetailsMeta");
@@ -28,7 +27,17 @@ const vcTabScheduleBtn = document.getElementById("vcTabScheduleBtn");
 const vcTabOverviewEl = document.getElementById("vcTabOverviewEl");
 const vcTabPaymentsEl = document.getElementById("vcTabPaymentsEl");
 const vcTabScheduleEl = document.getElementById("vcTabScheduleEl");
-const vcImagesInputEl = document.getElementById("vcImagesInput");
+
+// Investments Details Panel Elements
+const vcInvestmentsDetailsPanel = document.getElementById("vcInvestmentsDetailsPanel");
+const vcInvestmentsDetailsName = document.getElementById("vcInvestmentsDetailsName");
+const vcInvestmentsDetailsMeta = document.getElementById("vcInvestmentsDetailsMeta");
+const vcInvestmentsTabOverviewBtn = document.getElementById("vcInvestmentsTabOverviewBtn");
+const vcInvestmentsTabPaymentsBtn = document.getElementById("vcInvestmentsTabPaymentsBtn");
+const vcInvestmentsTabScheduleBtn = document.getElementById("vcInvestmentsTabScheduleBtn");
+const vcInvestmentsTabOverviewEl = document.getElementById("vcInvestmentsTabOverviewEl");
+const vcInvestmentsTabPaymentsEl = document.getElementById("vcInvestmentsTabPaymentsEl");
+const vcInvestmentsTabScheduleEl = document.getElementById("vcInvestmentsTabScheduleEl");
 
 // New VC Tab Navigation
 const vcManagedByMeBtn = document.getElementById("vcManagedByMeBtn");
@@ -45,6 +54,8 @@ let monthPaymentsUnsub = null;
 let monthPaymentsByMonth = {};
 let unsubscribeCommittees = null;
 let currentVcView = "managed"; // "managed" or "investments"
+let vcMembers = []; // Store members for current VC being created
+let currentMemberImage = null; // Store current member's uploaded image
 
 // Utility Functions
 const formatCurrency = (amount) =>
@@ -72,18 +83,21 @@ function openImageModal(dataUrl) {
   imageModalEl.classList.add("flex");
 }
 
-function compressImage(dataUrl, maxWidth = 600, maxHeight = 600, quality = 0.5) {
+// Make openImageModal globally accessible
+window.openImageModal = openImageModal;
+
+function compressImage(dataUrl, maxWidth = 400, maxHeight = 400, quality = 0.3) {
   return new Promise((resolve) => {
-    console.log("Starting VC image compression...");
+    console.log("Starting member image compression...");
     
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
-      // Calculate new dimensions - aggressive compression
+      // Calculate new dimensions - aggressive compression for 100KB target
       let { width, height } = img;
-      console.log(`Original VC image dimensions: ${width}x${height}`);
+      console.log(`Original member image dimensions: ${width}x${height}`);
       
       if (width > maxWidth || height > maxHeight) {
         const aspectRatio = width / height;
@@ -99,20 +113,20 @@ function compressImage(dataUrl, maxWidth = 600, maxHeight = 600, quality = 0.5) 
       canvas.width = width;
       canvas.height = height;
       
-      console.log(`Compressed VC image dimensions: ${width}x${height}`);
+      console.log(`Compressed member image dimensions: ${width}x${height}`);
       
       // Draw and compress
       ctx.drawImage(img, 0, 0, width, height);
       
-      // Try to get under 500KB, reduce quality aggressively if needed
+      // Try to get under 100KB, reduce quality aggressively if needed
       let currentQuality = quality;
       const checkSize = () => {
         const compressedDataUrl = canvas.toDataURL('image/jpeg', currentQuality);
         const sizeInKB = Math.round(compressedDataUrl.length * 0.75 / 1024);
         
-        console.log(`VC compression attempt - Quality: ${currentQuality}, Size: ${sizeInKB}KB`);
+        console.log(`Member compression attempt - Quality: ${currentQuality}, Size: ${sizeInKB}KB`);
         
-        if (sizeInKB > 500 && currentQuality > 0.1) {
+        if (sizeInKB > 100 && currentQuality > 0.1) {
           currentQuality -= 0.1;
           return checkSize();
         }
@@ -127,7 +141,7 @@ function compressImage(dataUrl, maxWidth = 600, maxHeight = 600, quality = 0.5) 
       checkSize();
     };
     img.onerror = () => {
-      console.error("VC image loading failed during compression");
+      console.error("Member image loading failed during compression");
       resolve({
         compressedDataUrl: dataUrl,
         sizeInKB: Math.round(dataUrl.length * 0.75 / 1024),
@@ -138,101 +152,168 @@ function compressImage(dataUrl, maxWidth = 600, maxHeight = 600, quality = 0.5) 
   });
 }
 
-function readFilesAsDataUrls(fileList) {
-  const files = Array.from(fileList || []);
-  console.log(`Processing ${files.length} VC files for upload...`);
+async function readMemberImage(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    return null;
+  }
   
-  return Promise.all(
-    files.map(
-      (file) =>
-        new Promise((resolve, reject) => {
-          // Only process image files
-          if (!file.type.startsWith('image/')) {
-            console.error(`Invalid VC file type: ${file.type}`);
-            reject(new Error('Only image files are allowed'));
-            return;
-          }
-          
-          // Check file size before processing (max 10MB)
-          const fileSizeInMB = file.size / (1024 * 1024);
-          if (fileSizeInMB > 10) {
-            console.error(`VC file too large: ${fileSizeInMB}MB`);
-            reject(new Error('File size must be less than 10MB'));
-            return;
-          }
-          
-          console.log(`Processing VC file: ${file.name} (${fileSizeInMB.toFixed(2)}MB)`);
-          
-          const reader = new FileReader();
-          reader.onload = async () => {
-            try {
-              const originalDataUrl = String(reader.result || "");
-              console.log(`Original VC Base64 size: ${Math.round(originalDataUrl.length * 0.75 / 1024)}KB`);
-              
-              const { compressedDataUrl, sizeInKB, originalSize } = await compressImage(originalDataUrl);
-              
-              // Validate compressed size
-              if (sizeInKB > 500) {
-                console.error(`Compressed VC image still too large: ${sizeInKB}KB`);
-                reject(new Error('Image too large even after compression. Please use a smaller photo.'));
-                return;
-              }
-              
-              console.log(`Successfully compressed VC: ${file.name} - ${sizeInKB}KB (was ${originalSize}KB)`);
-              
-              resolve({
-                id: crypto.randomUUID(),
-                name: file.name,
-                dataUrl: compressedDataUrl,
-                originalDataUrl, // Keep original for reference if needed
-                sizeInKB,
-                originalSize,
-                uploadedAt: new Date().toISOString(),
-              });
-            } catch (error) {
-              console.error('VC image compression failed:', error);
-              reject(new Error('Image compression failed: ' + error.message));
-            }
-          };
-          reader.onerror = (error) => {
-            console.error('VC file read failed:', error);
-            reject(new Error('File read failed'));
-          };
-          reader.readAsDataURL(file);
-        })
-    )
-  );
+  console.log(`Processing member image: ${file.name}`);
+  
+  return new Promise((resolve, reject) => {
+    // Check file size before processing (max 10MB)
+    const fileSizeInMB = file.size / (1024 * 1024);
+    if (fileSizeInMB > 10) {
+      console.error(`Member image file too large: ${fileSizeInMB}MB`);
+      reject(new Error('File size must be less than 10MB'));
+      return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const originalDataUrl = String(reader.result || "");
+        console.log(`Original member Base64 size: ${Math.round(originalDataUrl.length * 0.75 / 1024)}KB`);
+        
+        const { compressedDataUrl, sizeInKB, originalSize } = await compressImage(originalDataUrl);
+        
+        // Validate compressed size
+        if (sizeInKB > 100) {
+          console.error(`Compressed member image still too large: ${sizeInKB}KB`);
+          reject(new Error('Image too large even after compression. Please use a smaller photo.'));
+          return;
+        }
+        
+        console.log(`Successfully compressed member image: ${file.name} - ${sizeInKB}KB (was ${originalSize}KB)`);
+        
+        resolve({
+          id: crypto.randomUUID(),
+          name: file.name,
+          dataUrl: compressedDataUrl,
+          sizeInKB,
+          uploadedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.error('Member image compression failed:', error);
+        reject(new Error('Image compression failed: ' + error.message));
+      }
+    };
+    reader.onerror = (error) => {
+      console.error('Member image file read failed:', error);
+      reject(new Error('File read failed'));
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // Member Management Functions
+function renderMembersList() {
+  const membersListContent = document.getElementById("membersListContent");
+  if (!membersListContent) return;
+  
+  if (vcMembers.length === 0) {
+    membersListContent.innerHTML = `<p class="text-sm text-slate-500 italic">No members added yet.</p>`;
+    return;
+  }
+  
+  membersListContent.innerHTML = vcMembers.map((member, index) => `
+    <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
+      ${member.image ? `
+        <div class="shrink-0">
+          <img src="${member.image.dataUrl}" alt="${member.name || 'Member'}" class="h-12 w-12 rounded-lg object-cover border border-slate-200" />
+        </div>
+      ` : `
+        <div class="shrink-0 h-12 w-12 rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center">
+          <i data-lucide="user" class="h-6 w-6 text-slate-400"></i>
+        </div>
+      `}
+      <div class="flex-1 min-w-0">
+        <p class="font-semibold text-slate-900 truncate">${member.name || 'Unnamed Member'}</p>
+        <p class="text-sm text-slate-600">
+          ${member.turnNumber ? `Turn #${member.turnNumber}` : 'No Turn #'} 
+          ${member.whatsapp ? `• ${member.whatsapp}` : ''}
+        </p>
+      </div>
+      <button type="button" onclick="removeMember(${index})" class="shrink-0 rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50">
+        Remove
+      </button>
+    </div>
+  `).join('');
+  
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function addMemberToList() {
+  const nameInput = document.getElementById("newMemberName");
+  const whatsappInput = document.getElementById("newMemberWhatsApp");
+  const turnInput = document.getElementById("newMemberTurn");
+  
+  const name = nameInput?.value?.trim();
+  const whatsapp = whatsappInput?.value?.trim();
+  const turnNumber = Number(turnInput?.value) || 0;
+  
+  // Check for duplicate turn numbers only if turn number is provided
+  if (turnNumber > 0 && vcMembers.some(m => m.turnNumber === turnNumber)) {
+    window.alert("Turn # must be unique for each member.");
+    return;
+  }
+  
+  const newMember = {
+    memberId: crypto.randomUUID(),
+    name: name || "", // Empty string if not provided
+    whatsapp: whatsapp || "", // Empty string if not provided
+    turnNumber: turnNumber || 0, // 0 if not provided
+    image: currentMemberImage
+  };
+  
+  vcMembers.push(newMember);
+  renderMembersList();
+  
+  // Clear form
+  nameInput.value = "";
+  whatsappInput.value = "";
+  turnInput.value = "";
+  clearMemberImagePreview();
+  currentMemberImage = null;
+  
+  console.log("Added member:", newMember);
+}
+
+function removeMember(index) {
+  if (index >= 0 && index < vcMembers.length) {
+    const removedMember = vcMembers.splice(index, 1)[0];
+    renderMembersList();
+    console.log("Removed member:", removedMember);
+  }
+}
+
+// Make removeMember globally accessible
+window.removeMember = removeMember;
+
+function clearMemberImagePreview() {
+  const preview = document.getElementById("memberImagePreview");
+  if (preview) {
+    preview.innerHTML = "";
+  }
+  const input = document.getElementById("memberImageInput");
+  if (input) {
+    input.value = "";
+  }
+  currentMemberImage = null;
+}
+
+// Make clearMemberImagePreview globally accessible
+window.clearMemberImagePreview = clearMemberImagePreview;
+
 function syncMemberRemoveButtons() {
-  const rows = membersInputsEl.querySelectorAll(".member-row");
-  rows.forEach((row, idx) => {
-    const btn = row.querySelector(".remove-member-btn");
-    if (!btn) return;
-    const shouldDisable = rows.length <= 1;
-    btn.disabled = shouldDisable;
-    btn.classList.toggle("opacity-50", shouldDisable);
-    btn.classList.toggle("cursor-not-allowed", shouldDisable);
-  });
+  // This function is no longer needed with the new approach
+  // Keeping for backward compatibility
 }
 
 function createMemberRow() {
+  // This function is no longer needed with the new approach
+  // Keeping for backward compatibility - return empty div
   const row = document.createElement("div");
-  row.className = "member-row grid grid-cols-1 gap-2 sm:grid-cols-[1.4fr,1.4fr,0.8fr,auto] sm:items-center";
-  row.innerHTML = `
-    <input class="member-name w-full rounded-xl border px-3 py-2.5" type="text" placeholder="Member Name" required />
-    <input class="member-whatsapp w-full rounded-xl border px-3 py-2.5" type="text" placeholder="WhatsApp Number" required />
-    <input class="member-turn w-full rounded-xl border px-3 py-2.5" type="number" min="1" placeholder="Turn #" required />
-    <button type="button" class="remove-member-btn rounded-xl border border-rose-200 bg-white px-3 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50">Remove</button>
-  `;
-
-  const removeBtn = row.querySelector(".remove-member-btn");
-  removeBtn.addEventListener("click", () => {
-    row.remove();
-    syncMemberRemoveButtons();
-  });
-
+  row.className = "member-row hidden";
   return row;
 }
 
@@ -284,8 +365,11 @@ function renderCommittees() {
     targetList.innerHTML = `<div class="rounded-xl border border-dashed p-4 text-sm text-slate-500">
       ${currentVcView === "managed" ? "No VCs managed by you yet." : "No investment VCs found."}
     </div>`;
+    // Hide details panel for both views when no committees
     if (currentVcView === "managed") {
       vcDetailsPanel.classList.add("hidden");
+    } else {
+      vcInvestmentsDetailsPanel.classList.add("hidden");
     }
     return;
   }
@@ -296,8 +380,11 @@ function renderCommittees() {
     monthPaymentsByMonth = {};
     if (monthPaymentsUnsub) monthPaymentsUnsub();
     monthPaymentsUnsub = null;
+    // Hide details panel for both views when selection is cleared
     if (currentVcView === "managed") {
       vcDetailsPanel.classList.add("hidden");
+    } else {
+      vcInvestmentsDetailsPanel.classList.add("hidden");
     }
   }
 
@@ -383,6 +470,12 @@ function renderCommittees() {
               </span>
             </div>
           </div>
+          <div class="mt-2 flex gap-2">
+            <button data-action="delete" type="button" class="investment-delete-btn ml-auto inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50">
+              <i data-lucide="trash-2" class="h-3.5 w-3.5"></i>
+              Leave
+            </button>
+          </div>
         `;
       }
 
@@ -391,25 +484,29 @@ function renderCommittees() {
         if (target instanceof HTMLElement && target.closest("[data-action='delete']")) {
           return;
         }
-        if (currentVcView === "managed") {
-          selectCommittee(c.id);
-        }
+        // Both managed and investment cards should open details
+        selectCommittee(c.id);
       });
 
       card.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          if (currentVcView === "managed") {
-            selectCommittee(c.id);
-          }
+          // Both managed and investment cards should open details
+          selectCommittee(c.id);
         }
       });
 
-      if (currentVcView === "managed") {
-        const deleteBtn = card.querySelector("[data-action='delete']");
+      // Delete button for both managed and investment cards
+      const deleteBtn = card.querySelector("[data-action='delete']");
+      if (deleteBtn) {
         deleteBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
-          if (!window.confirm("Delete this VC committee record?")) return;
+          const confirmMessage = currentVcView === "managed" ? 
+            "Delete this VC committee record? This will remove all data." : 
+            "Leave this VC? This will remove you from the member list.";
+          if (!window.confirm(confirmMessage)) return;
+          
+          // Both managed and investment views delete the entire VC record
           await deleteDoc(doc(db, "committees", c.id));
         });
       }
@@ -426,7 +523,12 @@ function selectCommittee(committeeId) {
   const c = committees.find((x) => x.id === committeeId);
   selectedMonthNo = Math.max(1, Number(c?.currentPayoutMonth) || 1);
 
-  vcDetailsPanel.classList.remove("hidden");
+  // Show details panel for both managed and investment views
+  if (currentVcView === "managed") {
+    vcDetailsPanel.classList.remove("hidden");
+  } else {
+    vcInvestmentsDetailsPanel.classList.remove("hidden");
+  }
   setVcTab("overview");
   renderVcDetails();
 
@@ -450,13 +552,25 @@ function selectCommittee(committeeId) {
 function setVcTab(tabName) {
   selectedVcTab = tabName;
   const baseBtn = "w-1/3 rounded-lg px-3 py-2 text-sm font-semibold";
-  vcTabOverviewBtn.className = tabName === "overview" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
-  vcTabPaymentsBtn.className = tabName === "payments" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
-  vcTabScheduleBtn.className = tabName === "schedule" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
+  
+  if (currentVcView === "managed") {
+    vcTabOverviewBtn.className = tabName === "overview" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
+    vcTabPaymentsBtn.className = tabName === "payments" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
+    vcTabScheduleBtn.className = tabName === "schedule" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
 
-  vcTabOverviewEl.classList.toggle("hidden", tabName !== "overview");
-  vcTabPaymentsEl.classList.toggle("hidden", tabName !== "payments");
-  vcTabScheduleEl.classList.toggle("hidden", tabName !== "schedule");
+    vcTabOverviewEl.classList.toggle("hidden", tabName !== "overview");
+    vcTabPaymentsEl.classList.toggle("hidden", tabName !== "payments");
+    vcTabScheduleEl.classList.toggle("hidden", tabName !== "schedule");
+  } else {
+    // Investments view
+    vcInvestmentsTabOverviewBtn.className = tabName === "overview" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
+    vcInvestmentsTabPaymentsBtn.className = tabName === "payments" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
+    vcInvestmentsTabScheduleBtn.className = tabName === "schedule" ? `${baseBtn} bg-white text-slate-800 shadow border border-slate-200` : `${baseBtn} bg-slate-50 text-slate-600`;
+
+    vcInvestmentsTabOverviewEl.classList.toggle("hidden", tabName !== "overview");
+    vcInvestmentsTabPaymentsEl.classList.toggle("hidden", tabName !== "payments");
+    vcInvestmentsTabScheduleEl.classList.toggle("hidden", tabName !== "schedule");
+  }
 
   renderVcDetails();
 }
@@ -485,11 +599,17 @@ function renderVcOverview(committee) {
   const monthlyInstallment = Number(committee.monthlyInstallment) || 0;
   const totalMonths = Number(committee.totalMonths) || 0;
 
-  vcDetailsName.textContent = committee.vcName || "VC";
-  vcDetailsMeta.textContent = `${members.length} member(s) | ${formatCurrency(monthlyInstallment)} / month | Total ${totalMonths} month(s)`;
+  // Use correct elements based on current view
+  const detailsName = currentVcView === "managed" ? vcDetailsName : vcInvestmentsDetailsName;
+  const detailsMeta = currentVcView === "managed" ? vcDetailsMeta : vcInvestmentsDetailsMeta;
+  const tabOverviewEl = currentVcView === "managed" ? vcTabOverviewEl : vcInvestmentsTabOverviewEl;
+  const attachWrapId = currentVcView === "managed" ? "vc-attachments" : "vc-investments-attachments";
+
+  detailsName.textContent = committee.vcName || "VC";
+  detailsMeta.textContent = `${members.length} member(s) | ${formatCurrency(monthlyInstallment)} / month | Total ${totalMonths} month(s)`;
 
   const attachments = Array.isArray(committee.attachments) ? committee.attachments : [];
-  const attachWrap = document.getElementById("vc-attachments");
+  const attachWrap = document.getElementById(attachWrapId);
   if (attachWrap) {
     attachWrap.innerHTML = "";
     if (attachments.length) {
@@ -509,7 +629,7 @@ function renderVcOverview(committee) {
   // Advanced Member Grid
   const memberGridHtml = createAdvancedMemberGrid(committee);
   
-  vcTabOverviewEl.innerHTML = `
+  tabOverviewEl.innerHTML = `
     <div class="rounded-xl bg-white p-4 border border-slate-200">
       <div class="flex items-start justify-between gap-4">
         <div class="min-w-0">
@@ -561,10 +681,21 @@ function createAdvancedMemberGrid(committee) {
       html += `
         <tr class="${isCurrentPayout ? 'bg-brand-50/70' : ''} border-b">
           <td class="py-2 pr-2 border-r">
-            <div class="flex flex-col">
-              <span class="font-semibold text-slate-900">${member.name}</span>
-              <span class="text-xs text-slate-500">Turn #${member.turnNumber}</span>
-              ${isCurrentPayout ? '<span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 mt-1">Current Payout</span>' : ''}
+            <div class="flex items-center gap-3">
+              ${member.image ? `
+                <div class="shrink-0">
+                  <img src="${member.image.dataUrl}" alt="${member.name}" class="h-10 w-10 rounded-lg object-cover border border-slate-200 cursor-pointer" onclick="openImageModal('${member.image.dataUrl}')" />
+                </div>
+              ` : `
+                <div class="shrink-0 h-10 w-10 rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center">
+                  <i data-lucide="user" class="h-5 w-5 text-slate-400"></i>
+                </div>
+              `}
+              <div class="flex flex-col min-w-0">
+                <span class="font-semibold text-slate-900 truncate">${member.name}</span>
+                <span class="text-xs text-slate-500">Turn #${member.turnNumber}</span>
+                ${isCurrentPayout ? '<span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 mt-1">Current Payout</span>' : ''}
+              </div>
             </div>
           </td>
       `;
@@ -603,12 +734,18 @@ function renderVcPayments(committee) {
   selectedMonthNo = safeMonthNo;
 
   const expectedMember = members.find((m) => Number(m.turnNumber) === safeMonthNo) || null;
-  vcDetailsName.textContent = committee.vcName || "VC";
-  vcDetailsMeta.textContent = `Current Month: ${safeMonthNo} (highlight: Turn #${safeMonthNo})`;
+  
+  // Use correct elements based on current view
+  const detailsName = currentVcView === "managed" ? vcDetailsName : vcInvestmentsDetailsName;
+  const detailsMeta = currentVcView === "managed" ? vcDetailsMeta : vcInvestmentsDetailsMeta;
+  const tabPaymentsEl = currentVcView === "managed" ? vcTabPaymentsEl : vcInvestmentsTabPaymentsEl;
+  
+  detailsName.textContent = committee.vcName || "VC";
+  detailsMeta.textContent = `Current Month: ${safeMonthNo} (highlight: Turn #${safeMonthNo})`;
 
   const paidSet = getPaidMemberIdsForMonth(safeMonthNo);
 
-  vcTabPaymentsEl.innerHTML = `
+  tabPaymentsEl.innerHTML = `
     <div class="rounded-xl bg-white p-4 border border-slate-200">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
@@ -654,12 +791,25 @@ function renderVcPayments(committee) {
                 return `
                   <tr class="${rowClass} border-b border-slate-100">
                     <td class="py-2 pr-2">
-                      <div class="flex items-center gap-2">
-                        <span class="font-semibold text-slate-900">${m.name || "-"}</span>
-                        ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50" title="WhatsApp Reminder">
-                          <i data-lucide="message-circle" class="h-4 w-4"></i>
-                        </a>` : ""}
-                        ${isCurrent ? '<span class="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700">Current Payout</span>' : ""}
+                      <div class="flex items-center gap-3">
+                        ${m.image ? `
+                          <div class="shrink-0">
+                            <img src="${m.image.dataUrl}" alt="${m.name}" class="h-10 w-10 rounded-lg object-cover border border-slate-200 cursor-pointer" onclick="openImageModal('${m.image.dataUrl}')" />
+                          </div>
+                        ` : `
+                          <div class="shrink-0 h-10 w-10 rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center">
+                            <i data-lucide="user" class="h-5 w-5 text-slate-400"></i>
+                          </div>
+                        `}
+                        <div class="min-w-0">
+                          <span class="font-semibold text-slate-900">${m.name || "-"}</span>
+                          <div class="flex items-center gap-2 mt-1">
+                            ${waLink ? `<a href="${waLink}" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50" title="WhatsApp Reminder">
+                              <i data-lucide="message-circle" class="h-4 w-4"></i>
+                            </a>` : ""}
+                            ${isCurrent ? '<span class="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700">Current Payout</span>' : ""}
+                          </div>
+                        </div>
                       </div>
                     </td>
                     <td class="py-2 pr-2 text-slate-700">${m.turnNumber || "-"}</td>
@@ -720,10 +870,16 @@ function renderVcSchedule(committee) {
   const currentMonthNo = Math.max(1, Number(committee.currentPayoutMonth) || Number(selectedMonthNo) || 1);
 
   const monthCount = Math.max(totalMonths, 1);
-  vcDetailsName.textContent = committee.vcName || "VC";
-  vcDetailsMeta.textContent = `Schedule for ${monthCount} months`;
+  
+  // Use correct elements based on current view
+  const detailsName = currentVcView === "managed" ? vcDetailsName : vcInvestmentsDetailsName;
+  const detailsMeta = currentVcView === "managed" ? vcDetailsMeta : vcInvestmentsDetailsMeta;
+  const tabScheduleEl = currentVcView === "managed" ? vcTabScheduleEl : vcInvestmentsTabScheduleEl;
+  
+  detailsName.textContent = committee.vcName || "VC";
+  detailsMeta.textContent = `Schedule for ${monthCount} months`;
 
-  vcTabScheduleEl.innerHTML = `
+  tabScheduleEl.innerHTML = `
     <div class="rounded-xl bg-white p-4 border border-slate-200">
       <div class="flex items-start justify-between gap-4">
         <div>
@@ -856,7 +1012,6 @@ function initializeVcModule() {
     const monthlyInstallment = Number(document.getElementById("monthlyInstallment")?.value) || 0;
     const totalMonths = Number(document.getElementById("totalMonths")?.value) || 0;
     const currentPayoutMonth = Number(document.getElementById("currentPayoutMonth")?.value) || 1;
-    const vcAttachments = await readFilesAsDataUrls(vcImagesInputEl?.files);
     
     // Get selected role
     const selectedRole = document.querySelector('input[name="vcRole"]:checked')?.value;
@@ -874,35 +1029,16 @@ function initializeVcModule() {
       return;
     }
 
-    const rows = membersInputsEl.querySelectorAll(".member-row");
-    const members = Array.from(rows).map((row) => {
-      const name = row.querySelector(".member-name")?.value?.trim();
-      const whatsapp = row.querySelector(".member-whatsapp")?.value?.trim();
-      const turnNumber = Number(row.querySelector(".member-turn")?.value) || 0;
-      return {
-        memberId: crypto.randomUUID(),
-        name: name || "",
-        whatsapp: whatsapp || "",
-        turnNumber,
-      };
-    });
-
-    if (members.length < 1) {
-      window.alert("Add at least one member.");
-      return;
-    }
-
-    const invalid = members.find((m) => !m.name || !m.whatsapp || !Number.isFinite(m.turnNumber) || m.turnNumber <= 0);
-    if (invalid) {
-      window.alert("Each member needs Name, WhatsApp number and a valid Turn #.");
-      return;
-    }
-
-    const turns = members.map((m) => m.turnNumber);
-    const uniqueTurns = new Set(turns);
-    if (uniqueTurns.size !== turns.length) {
-      window.alert("Turn # values must be unique for each member.");
-      return;
+    // Members are completely optional - no validation needed
+    // Just check for duplicate turn numbers if provided
+    if (vcMembers.length > 0) {
+      const membersWithTurns = vcMembers.filter(m => m.turnNumber && m.turnNumber > 0);
+      const turns = membersWithTurns.map((m) => m.turnNumber);
+      const uniqueTurns = new Set(turns);
+      if (uniqueTurns.size !== turns.length) {
+        window.alert("Turn # values must be unique for each member (when provided).");
+        return;
+      }
     }
 
     await addDoc(collection(db, "committees"), {
@@ -913,20 +1049,20 @@ function initializeVcModule() {
       monthlyInstallment,
       totalMonths,
       currentPayoutMonth,
-      members,
-      attachments: vcAttachments,
+      members: vcMembers, // Use the new member array with images
+      attachments: [], // No VC-level attachments anymore
       paidMonthNumbers: [],
       createdAt: new Date().toISOString(),
     });
     
     console.log("VC created successfully with role:", selectedRole);
 
-    // Reset form + members UI back to a single empty row
+    // Reset form + members UI
     committeeForm.reset();
-    membersInputsEl.innerHTML = "";
-    membersInputsEl.appendChild(createMemberRow());
-    syncMemberRemoveButtons();
-    if (vcImagesInputEl) vcImagesInputEl.value = "";
+    vcMembers = [];
+    currentMemberImage = null;
+    renderMembersList();
+    clearMemberImagePreview();
   });
 
   // VC Tab Navigation
@@ -938,43 +1074,55 @@ function initializeVcModule() {
   if (vcTabPaymentsBtn) vcTabPaymentsBtn.addEventListener("click", () => setVcTab("payments"));
   if (vcTabScheduleBtn) vcTabScheduleBtn.addEventListener("click", () => setVcTab("schedule"));
 
+  // Investments Details Tabs
+  if (vcInvestmentsTabOverviewBtn) vcInvestmentsTabOverviewBtn.addEventListener("click", () => setVcTab("overview"));
+  if (vcInvestmentsTabPaymentsBtn) vcInvestmentsTabPaymentsBtn.addEventListener("click", () => setVcTab("payments"));
+  if (vcInvestmentsTabScheduleBtn) vcInvestmentsTabScheduleBtn.addEventListener("click", () => setVcTab("schedule"));
+
   // Member management
-  if (addMemberBtn) {
-    addMemberBtn.addEventListener("click", () => {
-      membersInputsEl.appendChild(createMemberRow());
-      syncMemberRemoveButtons();
-      if (window.lucide) window.lucide.createIcons();
+  const addMemberSubmitBtn = document.getElementById("addMemberSubmitBtn");
+  if (addMemberSubmitBtn) {
+    addMemberSubmitBtn.addEventListener("click", () => {
+      addMemberToList();
     });
   }
 
-  // Image preview functionality
-  const vcImagesInputEl = document.getElementById("vcImagesInput");
-  const vcImagePreviewEl = document.getElementById("vcImagePreview");
+  // Member image upload
+  const memberImageInput = document.getElementById("memberImageInput");
+  const memberImagePreview = document.getElementById("memberImagePreview");
   
-  if (vcImagesInputEl && vcImagePreviewEl) {
-    vcImagesInputEl.addEventListener("change", (e) => {
-      const files = Array.from(e.target.files);
-      vcImagePreviewEl.innerHTML = "";
+  if (memberImageInput && memberImagePreview) {
+    memberImageInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
       
-      files.forEach((file, index) => {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const preview = document.createElement("div");
-            preview.className = "relative group";
-            preview.innerHTML = `
-              <img src="${e.target.result}" class="h-16 w-16 rounded-lg object-cover border border-slate-200" />
-              <button type="button" class="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-rose-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity" onclick="this.parentElement.remove(); updateFileInput('vcImagesInput')">×</button>
-              <div class="mt-1 text-xs text-slate-500 text-center">${file.name}</div>
-            `;
-            vcImagePreviewEl.appendChild(preview);
-          };
-          reader.readAsDataURL(file);
-        }
-      });
+      try {
+        memberImagePreview.innerHTML = "<p class='text-sm text-slate-500'>Processing...</p>";
+        const imageData = await readMemberImage(file);
+        currentMemberImage = imageData;
+        
+        // Show preview
+        memberImagePreview.innerHTML = `
+          <div class="relative group">
+            <img src="${imageData.dataUrl}" class="h-16 w-16 rounded-lg object-cover border border-slate-200" />
+            <button type="button" class="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-rose-500 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity" onclick="clearMemberImagePreview()">×</button>
+            <div class="mt-1 text-xs text-slate-500 text-center">${file.name}</div>
+          </div>
+        `;
+        
+        console.log("Member image processed successfully:", imageData.sizeInKB, "KB");
+      } catch (error) {
+        console.error("Error processing member image:", error);
+        window.alert(error.message || "Failed to process image. Please try another image.");
+        clearMemberImagePreview();
+        currentMemberImage = null;
+      }
     });
   }
 
+  // Initialize the members list display
+  renderMembersList();
+  
   syncMemberRemoveButtons();
   setVcView("managed");
 }
