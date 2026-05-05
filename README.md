@@ -189,3 +189,11 @@ For support and queries, please open an issue in the repository.
 ---
 
 **Karza Manager** - Simplifying debt and committee management for everyone.
+
+
+
+# git add .
+# git commit -m "Fixed My Investments card interactivity, Delete option, and optional member fields"
+# git push origin main
+
+# npx serve      //#for run

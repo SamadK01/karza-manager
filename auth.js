@@ -40,6 +40,7 @@ const loginForm = document.getElementById("loginForm");
 const registerForm = document.getElementById("registerForm");
 const loginEmail = document.getElementById("loginEmail");
 const loginPassword = document.getElementById("loginPassword");
+const rememberMe = document.getElementById("rememberMe");
 const registerName = document.getElementById("registerName");
 const registerEmail = document.getElementById("registerEmail");
 const registerPassword = document.getElementById("registerPassword");
@@ -66,20 +67,33 @@ function setAuthMode(mode) {
 async function loginUser() {
   try {
     await signInWithPopup(auth, provider);
+    window.utils?.showToast("Successfully logged in!", "success");
   } catch (error) {
     console.error(error);
-    window.alert("Google login failed.");
+    window.utils?.showToast("Google login failed. Please try again.", "error");
   }
 }
 
 async function loginWithEmail(event) {
   event.preventDefault();
   try {
+    const persistence = rememberMe.checked ? 'local' : 'session';
     await signInWithEmailAndPassword(auth, loginEmail.value.trim(), loginPassword.value);
+    
+    // Store remember me preference
+    if (rememberMe.checked) {
+      localStorage.setItem('karza-remember-email', loginEmail.value.trim());
+      localStorage.setItem('karza-remember-time', Date.now().toString());
+    } else {
+      localStorage.removeItem('karza-remember-email');
+      localStorage.removeItem('karza-remember-time');
+    }
+    
     loginForm.reset();
+    window.utils?.showToast("Successfully logged in!", "success");
   } catch (error) {
     console.error(error);
-    window.alert(error.message || "Login failed.");
+    window.utils?.showToast(error.message || "Login failed. Please check your credentials.", "error");
   }
 }
 
@@ -89,9 +103,10 @@ async function registerWithEmail(event) {
     const userCredential = await createUserWithEmailAndPassword(auth, registerEmail.value.trim(), registerPassword.value);
     await updateProfile(userCredential.user, { displayName: registerName.value.trim() });
     registerForm.reset();
+    window.utils?.showToast("Account created successfully!", "success");
   } catch (error) {
     console.error(error);
-    window.alert(error.message || "Registration failed.");
+    window.utils?.showToast(error.message || "Registration failed. Please try again.", "error");
   }
 }
 
@@ -123,6 +138,22 @@ async function migrateLocalStorageData(user) {
 }
 
 function initializeAuth() {
+  // Check for remembered email and auto-fill
+  const rememberedEmail = localStorage.getItem('karza-remember-email');
+  const rememberedTime = localStorage.getItem('karza-remember-time');
+  
+  if (rememberedEmail && rememberedTime) {
+    const daysPassed = (Date.now() - parseInt(rememberedTime)) / (1000 * 60 * 60 * 24);
+    if (daysPassed <= 30) {
+      loginEmail.value = rememberedEmail;
+      rememberMe.checked = true;
+    } else {
+      // Clear expired remember me data
+      localStorage.removeItem('karza-remember-email');
+      localStorage.removeItem('karza-remember-time');
+    }
+  }
+
   // Event Listeners
   if (googleLoginBtn) googleLoginBtn.addEventListener("click", loginUser);
   if (loginForm) loginForm.addEventListener("submit", loginWithEmail);

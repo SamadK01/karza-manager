@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Karza | Debt Management</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="utils.js"></script>
     <script>
       tailwind.config = {
         theme: {
@@ -31,6 +32,44 @@
         filter: blur(8px);
         user-select: none;
       }
+      
+      /* Dark Mode Styles */
+      .dark {
+        color-scheme: dark;
+      }
+      .dark body {
+        background:
+          radial-gradient(circle at top, rgba(59, 130, 246, 0.12), transparent 28%),
+          linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+        color: #f1f5f9;
+      }
+      .dark .bg-white {
+        background-color: #1e293b !important;
+      }
+      .dark .bg-white\/90 {
+        background-color: rgba(30, 41, 59, 0.9) !important;
+      }
+      .dark .text-slate-900 {
+        color: #f1f5f9 !important;
+      }
+      .dark .text-slate-600 {
+        color: #cbd5e1 !important;
+      }
+      .dark .text-slate-500 {
+        color: #94a3b8 !important;
+      }
+      .dark .border-slate-200 {
+        border-color: #475569 !important;
+      }
+      .dark .border-slate-300 {
+        border-color: #475569 !important;
+      }
+      .dark .shadow {
+        box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3) !important;
+      }
+      .dark .shadow-xl {
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3) !important;
+      }
     </style>
   </head>
   <body class="min-h-screen text-slate-900">
@@ -48,6 +87,10 @@
           <form id="loginForm" class="mt-4 space-y-3">
             <input id="loginEmail" type="email" required placeholder="Email" class="w-full rounded-xl border px-3 py-2.5" />
             <input id="loginPassword" type="password" required minlength="6" placeholder="Password" class="w-full rounded-xl border px-3 py-2.5" />
+            <div class="flex items-center gap-2">
+              <input id="rememberMe" type="checkbox" class="rounded border-slate-300 text-brand-500 focus:ring-brand-500" />
+              <label for="rememberMe" class="text-sm text-slate-600">Remember me for 30 days</label>
+            </div>
             <button class="w-full rounded-xl bg-slate-900 px-4 py-2.5 font-semibold text-white">Login</button>
           </form>
 
@@ -78,6 +121,7 @@
               <p id="userInfo" class="mt-2 text-sm text-slate-600"></p>
             </div>
             <div class="flex flex-wrap gap-3">
+              <button id="darkModeToggleBtn" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">🌙 Dark Mode</button>
               <button id="privacyToggleBtn" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">Privacy Blur</button>
               <button id="pdfReportBtn" class="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold">Download PDF Report</button>
               <button id="logoutBtn" class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white">Logout</button>

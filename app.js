@@ -20,13 +20,40 @@ document.addEventListener('DOMContentLoaded', () => {
   }, 100);
   
   // Global UI controls
+  const darkModeToggleBtn = document.getElementById("darkModeToggleBtn");
   const privacyToggleBtn = document.getElementById("privacyToggleBtn");
   const pdfReportBtn = document.getElementById("pdfReportBtn");
+  
+  // Dark mode toggle
+  if (darkModeToggleBtn) {
+    // Check for saved theme preference or default to light mode
+    const savedTheme = localStorage.getItem('karza-theme') || 'light';
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+      darkModeToggleBtn.innerHTML = '☀️ Light Mode';
+    }
+    
+    darkModeToggleBtn.addEventListener("click", () => {
+      const isDark = document.documentElement.classList.toggle('dark');
+      localStorage.setItem('karza-theme', isDark ? 'dark' : 'light');
+      darkModeToggleBtn.innerHTML = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+      
+      window.utils?.showToast(
+        isDark ? 'Dark mode enabled' : 'Light mode enabled', 
+        'info'
+      );
+    });
+  }
   
   // Privacy toggle
   if (privacyToggleBtn) {
     privacyToggleBtn.addEventListener("click", () => {
       document.body.classList.toggle("privacy-on");
+      const isPrivacyOn = document.body.classList.contains("privacy-on");
+      window.utils?.showToast(
+        isPrivacyOn ? 'Privacy mode enabled' : 'Privacy mode disabled', 
+        'info'
+      );
     });
   }
   
