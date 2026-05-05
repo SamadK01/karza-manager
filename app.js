@@ -2,6 +2,8 @@
 import { initializeAuth, currentUser } from './auth.js';
 import { initializeDebtModule, renderSummary } from './debt.js';
 import { initializeVcModule, renderCommittees } from './vc.js';
+import { initializeAnalytics, loadAnalyticsData } from './analytics.js';
+import { initializeNotifications } from './notifications.js';
 
 // Global modules
 window.authModule = { currentUser };
@@ -17,12 +19,57 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     initializeDebtModule();
     initializeVcModule();
+    initializeAnalytics();
+    // Initialize notifications with extra delay to ensure auth is ready
+    setTimeout(initializeNotifications, 1000);
   }, 100);
   
   // Global UI controls
+  const notificationBtn = document.getElementById("notificationBtn");
+  const analyticsToggleBtn = document.getElementById("analyticsToggleBtn");
   const darkModeToggleBtn = document.getElementById("darkModeToggleBtn");
   const privacyToggleBtn = document.getElementById("privacyToggleBtn");
   const pdfReportBtn = document.getElementById("pdfReportBtn");
+  
+  // Notification panel toggle
+  if (notificationBtn) {
+    notificationBtn.addEventListener("click", () => {
+      const notificationPanel = document.getElementById("notificationPanel");
+      notificationPanel.classList.toggle("hidden");
+    });
+  }
+  
+  // Close notification panel when clicking outside
+  document.addEventListener("click", (e) => {
+    const notificationPanel = document.getElementById("notificationPanel");
+    const notificationBtn = document.getElementById("notificationBtn");
+    
+    if (!notificationPanel?.contains(e.target) && !notificationBtn?.contains(e.target)) {
+      notificationPanel?.classList.add("hidden");
+    }
+  });
+  
+  // Analytics toggle
+  if (analyticsToggleBtn) {
+    analyticsToggleBtn.addEventListener("click", () => {
+      const analyticsSection = document.getElementById("analyticsSection");
+      const isVisible = !analyticsSection.classList.contains("hidden");
+      
+      if (isVisible) {
+        analyticsSection.classList.add("hidden");
+        analyticsToggleBtn.innerHTML = "📊 Analytics";
+      } else {
+        analyticsSection.classList.remove("hidden");
+        analyticsToggleBtn.innerHTML = "📊 Hide Analytics";
+        loadAnalyticsData(); // Refresh data when showing
+      }
+      
+      window.utils?.showToast(
+        isVisible ? 'Analytics hidden' : 'Analytics dashboard opened', 
+        'info'
+      );
+    });
+  }
   
   // Dark mode toggle
   if (darkModeToggleBtn) {
@@ -115,6 +162,19 @@ function downloadSummaryPdf() {
   docPdf.save(`karza-report-${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
+// Register Service Worker for PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((registration) => {
+        console.log('Service Worker registered successfully:', registration);
+      })
+      .catch((error) => {
+        console.log('Service Worker registration failed:', error);
+      });
+  });
+}
+
 // Listen for auth state changes to update UI
 window.addEventListener('authStateChanged', (event) => {
   const user = event.detail.user;
@@ -123,8 +183,45 @@ window.addEventListener('authStateChanged', (event) => {
     if (window.lucide) {
       window.lucide.createIcons();
     }
+    
+    // Show PWA install prompt if available
+    showInstallPrompt();
   }
 });
+
+// PWA Install Prompt
+let deferredPrompt;
+let installButton;
+
+function showInstallPrompt() {
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    
+    // Create install button if it doesn't exist
+    if (!document.getElementById('installAppBtn')) {
+      installButton = document.createElement('button');
+      installButton.id = 'installAppBtn';
+      installButton.className = 'rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold';
+      installButton.innerHTML = '📱 Install App';
+      
+      const buttonContainer = document.querySelector('.flex.flex-wrap.gap-3');
+      if (buttonContainer) {
+        buttonContainer.appendChild(installButton);
+      }
+      
+      installButton.addEventListener('click', async () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          console.log(`User response to the install prompt: ${outcome}`);
+          deferredPrompt = null;
+          installButton.remove();
+        }
+      });
+    }
+  });
+}
 
 // Helper function to update file input after removing previews
 window.updateFileInput = function(inputId) {
